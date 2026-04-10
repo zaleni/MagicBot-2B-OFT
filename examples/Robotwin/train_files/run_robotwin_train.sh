@@ -1,5 +1,6 @@
-export NCCL_SOCKET_IFNAME=bond0
-export NCCL_IB_HCA=mlx5_2,mlx5_3
+# Optional NCCL NIC/HCA pinning. Set these in your shell if the cluster needs them.
+unset NCCL_SOCKET_IFNAME
+unset NCCL_IB_HCA
 
 # used for check save when communication
 export NCCL_BLOCKING_WAIT=1

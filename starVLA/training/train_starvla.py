@@ -57,6 +57,25 @@ def load_fast_tokenizer():
     return AutoProcessor.from_pretrained("physical-intelligence/fast", trust_remote_code=True)
 
 
+def safe_dist_barrier() -> None:
+    if not dist.is_initialized():
+        return
+
+    try:
+        backend = dist.get_backend()
+    except Exception:
+        backend = None
+
+    if backend == "nccl" and torch.cuda.is_available():
+        try:
+            dist.barrier(device_ids=[torch.cuda.current_device()])
+            return
+        except TypeError:
+            pass
+
+    dist.barrier()
+
+
 def setup_directories(cfg) -> Path:
     """Create output directory and checkpoint directory."""
     cfg.output_dir = os.path.join(cfg.run_root_dir, cfg.run_id)
@@ -80,7 +99,7 @@ def prepare_data(cfg, accelerator, output_dir) -> DataLoader:
     vla_train_dataloader = build_dataloader(cfg=cfg, dataset_py=cfg.datasets.vla_data.dataset_py)
 
     accelerator.dataloader_config.dispatch_batches = False
-    dist.barrier()
+    safe_dist_barrier()
     return vla_train_dataloader
 
 
@@ -338,7 +357,7 @@ class VLATrainer(TrainerUtils):
             step_metrics["mse_score"] = score / num_pots
 
         del examples
-        dist.barrier()
+        safe_dist_barrier()
         return step_metrics
 
     def _log_training_config(self):
@@ -430,7 +449,7 @@ def main(cfg) -> None:
     trainer.train()
 
     logger.info("... and that's all, folks!")
-    dist.barrier()
+    safe_dist_barrier()
     dist.destroy_process_group()
 
 

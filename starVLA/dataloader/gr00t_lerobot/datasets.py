@@ -37,6 +37,7 @@ from typing import Sequence
 
 import numpy as np
 import pandas as pd
+import torch
 import torch.distributed as dist
 from PIL import Image
 from pydantic import BaseModel, Field, ValidationError
@@ -67,6 +68,25 @@ EPSILON = 5e-4
 #  LeRobot v3.0 dataset file names
 LE_ROBOT3_TASKS_FILENAME = "meta/tasks.parquet"
 LE_ROBOT3_EPISODE_FILENAME = "meta/episodes/*/*.parquet"
+
+
+def _safe_dist_barrier() -> None:
+    if not dist.is_initialized():
+        return
+
+    try:
+        backend = dist.get_backend()
+    except Exception:
+        backend = None
+
+    if backend == "nccl" and torch.cuda.is_available():
+        try:
+            dist.barrier(device_ids=[torch.cuda.current_device()])
+            return
+        except TypeError:
+            pass
+
+    dist.barrier()
 
 
 def calculate_dataset_statistics(parquet_paths: list[Path]) -> dict:
@@ -823,8 +843,7 @@ class LeRobotSingleDataset(Dataset):
         else:
             le_statistics = None
 
-        if dist.is_initialized():
-            dist.barrier()
+        _safe_dist_barrier()
 
         if le_statistics is None:
             le_statistics = _load_stats_cache(
@@ -965,8 +984,7 @@ class LeRobotSingleDataset(Dataset):
             print(f"[RANK 0] Cached steps saved to {steps_path}")
 
         # ---------- sync after rank0  ----------
-        if dist.is_initialized():
-            dist.barrier()
+        _safe_dist_barrier()
 
         # ---------- read by all rank ----------
         with open(steps_path, "rb") as f:

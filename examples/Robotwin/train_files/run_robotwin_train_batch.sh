@@ -12,9 +12,9 @@
 set -e
 
 # -------------------- NCCL / Networking --------------------
-export NCCL_SOCKET_IFNAME=bond0
-# For multi-node, list all available mlx5 interfaces for stability (adjust for your cluster)
-export NCCL_IB_HCA=mlx5_2,mlx5_3,mlx5_4,mlx5_5
+# Optional NCCL NIC/HCA pinning. Set these in the environment if your cluster requires them.
+unset NCCL_SOCKET_IFNAME
+unset NCCL_IB_HCA
 
 export NCCL_BLOCKING_WAIT=1
 export NCCL_ASYNC_ERROR_HANDLING=1
