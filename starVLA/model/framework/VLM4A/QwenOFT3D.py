@@ -17,7 +17,10 @@ from starVLA.model.modules.future3d import (
 )
 from starVLA.model.modules.vlm import get_vlm_model
 from starVLA.model.tools import FRAMEWORK_REGISTRY
+from starVLA.training.trainer_utils import initialize_overwatch
 from starVLA.training.trainer_utils.trainer_tools import resize_images
+
+logger = initialize_overwatch(__name__)
 
 
 @dataclass
@@ -74,6 +77,7 @@ class QwenOFT3D(baseframework):
         self.chunk_len = self.past_action_window_size + 1 + self.future_action_window_size
 
         self.action_token = self.config.framework.action_model.get("placeholder_token", "\U0001F50D")
+        self._runtime_registered_tokens = {}
         self.action_token_id = self._resolve_single_token_id(self.action_token, "action")
         self.l1_loss = nn.L1Loss()
 
@@ -156,6 +160,14 @@ class QwenOFT3D(baseframework):
             self.future_3d_messenger_norms = nn.ModuleList()
             self.future_3d_output_decoder = None
             self.da3_teacher = None
+
+        logger.info(
+            "QwenOFT3D placeholder tokens | "
+            f"action={self.action_token!r} id={self.action_token_id} "
+            f"runtime_registered={self._runtime_registered_tokens.get('action', False)} | "
+            f"future3d={self.future_3d_token!r} id={self.future_3d_token_id} "
+            f"runtime_registered={self._runtime_registered_tokens.get('future3d', False)}"
+        )
 
     def forward(self, examples: List[dict] = None, **kwargs) -> Tuple:
         batch_images = [example["image"] for example in examples]
@@ -296,6 +308,11 @@ class QwenOFT3D(baseframework):
             raise ValueError(
                 f"Registered {token_name} placeholder token {token!r}, but failed to retrieve its token id."
             )
+        self._runtime_registered_tokens[token_name] = True
+        logger.info(
+            f"Registered runtime special token for {token_name}: token={token!r}, "
+            f"token_id={token_id}, old_vocab_size={old_vocab_size}, new_vocab_size={len(tokenizer)}"
+        )
         return token_id
 
     def _resolve_single_token_id(self, token: str, token_name: str) -> int:
