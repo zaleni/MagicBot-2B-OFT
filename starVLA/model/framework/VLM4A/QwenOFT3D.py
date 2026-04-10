@@ -35,14 +35,14 @@ class QwenOFT3DDefaultConfig:
         "action_hidden_dim": 2560,
         "future_action_window_size": 49,
         "past_action_window_size": 0,
-        "placeholder_token": "\U0001F50D",
+        "placeholder_token": "<robot_action>",
     })
 
     future3d: dict = field(default_factory=lambda: {
         "enable": True,
         "future_delta": 15,
         "num_query_tokens": 432,
-        "placeholder_token": "\u25C6",
+        "placeholder_token": "<future3d_query>",
         "query_layer_indices": [11, 15, 19, 23],
         "lambda_3d": 0.01,
         "da3_model_path_or_name": "/inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/model/DA3-LARGE-1-1",
@@ -268,13 +268,40 @@ class QwenOFT3D(baseframework):
             raise RuntimeError("Failed to locate the Qwen input embedding layer for future-3D query injection.")
         return embedding_layer
 
+    def _register_runtime_special_token(self, token: str, token_name: str) -> int:
+        tokenizer = self.qwen_vl_interface.processor.tokenizer
+        model = self.qwen_vl_interface.model
+        embedding_layer = self._get_embedding_layer()
+        old_vocab_size = embedding_layer.weight.shape[0]
+
+        added_tokens = tokenizer.add_special_tokens({"additional_special_tokens": [token]})
+        if added_tokens <= 0:
+            token_id = tokenizer.convert_tokens_to_ids(token)
+            if token_id is None or token_id == tokenizer.unk_token_id:
+                raise ValueError(
+                    f"Failed to register {token_name} placeholder token {token!r} as a runtime special token."
+                )
+            return token_id
+
+        with torch.no_grad():
+            mean_embedding = embedding_layer.weight.data.mean(dim=0, keepdim=True)
+
+        model.resize_token_embeddings(len(tokenizer))
+        resized_embedding_layer = self._get_embedding_layer()
+        with torch.no_grad():
+            resized_embedding_layer.weight.data[old_vocab_size : old_vocab_size + added_tokens].copy_(mean_embedding)
+
+        token_id = tokenizer.convert_tokens_to_ids(token)
+        if token_id is None or token_id == tokenizer.unk_token_id:
+            raise ValueError(
+                f"Registered {token_name} placeholder token {token!r}, but failed to retrieve its token id."
+            )
+        return token_id
+
     def _resolve_single_token_id(self, token: str, token_name: str) -> int:
         token_ids = self.qwen_vl_interface.processor.tokenizer(token, add_special_tokens=False)["input_ids"]
         if len(token_ids) != 1:
-            raise ValueError(
-                f"{token_name} placeholder token {token!r} is tokenized into {len(token_ids)} pieces: {token_ids}. "
-                "Please choose a placeholder that maps to a single tokenizer id."
-            )
+            return self._register_runtime_special_token(token, token_name)
         return token_ids[0]
 
     def _select_token_positions(

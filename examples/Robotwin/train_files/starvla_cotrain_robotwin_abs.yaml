@@ -18,7 +18,7 @@ framework:
     enable: true
     future_delta: 15
     num_query_tokens: 432
-    placeholder_token: "◆"
+    placeholder_token: "<future3d_query>"
     query_layer_indices: [11, 15, 19, 23]
     lambda_3d: 0.01
     da3_model_path_or_name: /inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/model/DA3-LARGE-1-1
@@ -32,7 +32,7 @@ framework:
 
   action_model:
     action_model_type: DiT-B
-    placeholder_token: "🔍"
+    placeholder_token: "<robot_action>"
     hidden_size: 1024     # Matches DiT's final projection, used for ActionDecoder
     add_pos_embed: True
     max_seq_len: 1024
