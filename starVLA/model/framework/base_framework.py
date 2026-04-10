@@ -21,6 +21,20 @@ from starVLA.training.trainer_utils import initialize_overwatch
 
 logger = initialize_overwatch(__name__)
 _FRAMEWORKS_IMPORTED = False
+_FRAMEWORK_IMPORT_ERRORS = {}
+
+
+def _import_framework_module(module_path: str) -> None:
+    try:
+        importlib.import_module(module_path)
+    except Exception as exc:
+        _FRAMEWORK_IMPORT_ERRORS[module_path] = f"{type(exc).__name__}: {exc}"
+        logger.warning(
+            "Skipping optional framework module `%s` due to import error: %s: %s",
+            module_path,
+            type(exc).__name__,
+            exc,
+        )
 
 
 def _auto_import_framework_modules() -> None:
@@ -41,9 +55,9 @@ def _auto_import_framework_modules() -> None:
             for _, sub_name, _ in pkgutil.iter_modules([str(sub_dir)]):
                 if sub_name.startswith("_"):
                     continue
-                importlib.import_module(f"starVLA.model.framework.{module_name}.{sub_name}")
+                _import_framework_module(f"starVLA.model.framework.{module_name}.{sub_name}")
         else:
-            importlib.import_module(f"starVLA.model.framework.{module_name}")
+            _import_framework_module(f"starVLA.model.framework.{module_name}")
 
     _FRAMEWORKS_IMPORTED = True
 
@@ -64,8 +78,15 @@ def build_framework(cfg): # The single entry point for building different model 
     framework_id = cfg.framework.name
     if framework_id not in FRAMEWORK_REGISTRY._registry:
         available = sorted(FRAMEWORK_REGISTRY._registry.keys())
+        skipped_modules = sorted(_FRAMEWORK_IMPORT_ERRORS.keys())
+        skipped_hint = ""
+        if skipped_modules:
+            skipped_hint = (
+                " Some framework modules were skipped during auto-import due to optional dependency errors: "
+                f"{skipped_modules}"
+            )
         raise NotImplementedError(
-            f"Framework `{framework_id}` is not implemented. Available frameworks: {available}"
+            f"Framework `{framework_id}` is not implemented. Available frameworks: {available}.{skipped_hint}"
         )
 
     model_class = FRAMEWORK_REGISTRY[framework_id]
