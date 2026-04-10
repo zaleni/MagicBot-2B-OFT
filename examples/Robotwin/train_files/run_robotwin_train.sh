@@ -21,7 +21,7 @@ run_id=${data_mix}_qwen35_2b_oft3d_10task
 ###########################################################################################
 
 
-# export WANDB_MODE=disabled
+export WANDB_MODE=offline
 
 output_dir=${run_root_dir}/${run_id}
 mkdir -p ${output_dir}
@@ -36,7 +36,7 @@ accelerate launch \
   --config_yaml ${config_yaml} \
   --framework.name ${Framework_name} \
   --framework.qwenvl.base_vlm ${base_vlm} \
-  --datasets.vla_data.per_device_batch_size 4 \
+  --datasets.vla_data.per_device_batch_size 2 \
   --datasets.vla_data.data_root_dir ${data_root} \
   --datasets.vla_data.data_mix ${data_mix} \
   --trainer.freeze_modules ${freeze_module_list} \

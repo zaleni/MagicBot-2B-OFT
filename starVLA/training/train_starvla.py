@@ -140,6 +140,8 @@ class VLATrainer(TrainerUtils):
 
         self.completed_steps = 0
         self.total_batch_size = self._calculate_total_batch_size()
+        self.wandb_run = None
+        self.wandb_enabled = False
 
     def prepare_training(self):
         rank = dist.get_rank() if dist.is_initialized() else 0
@@ -177,13 +179,30 @@ class VLATrainer(TrainerUtils):
 
     def _init_wandb(self):
         """Initialize Weights & Biases."""
-        if self.accelerator.is_main_process:
-            wandb.init(
+        if not self.accelerator.is_main_process:
+            return
+
+        trackers = list(getattr(self.config, "trackers", []))
+        if "wandb" not in trackers or os.environ.get("WANDB_MODE", "").lower() == "disabled":
+            logger.info("Weights & Biases logging is disabled for this run.")
+            return
+
+        try:
+            self.wandb_run = wandb.init(
                 name=self.config.run_id,
                 dir=os.path.join(self.config.output_dir, "wandb"),
                 project=self.config.wandb_project,
                 entity=self.config.wandb_entity,
                 group="vla-train",
+            )
+            self.wandb_enabled = self.wandb_run is not None
+        except Exception as exc:
+            self.wandb_run = None
+            self.wandb_enabled = False
+            logger.warning(
+                "Failed to initialize Weights & Biases, continuing without W&B logging: %s: %s",
+                type(exc).__name__,
+                exc,
             )
 
     def _init_checkpointing(self):
@@ -270,7 +289,8 @@ class VLATrainer(TrainerUtils):
         if self.completed_steps % self.config.trainer.logging_frequency == 0 and dist.get_rank() == 0:
             metrics["learning_rate"] = self.lr_scheduler.get_last_lr()[0]
             metrics["epoch"] = round(self.completed_steps / len(self.vla_train_dataloader), 2)
-            wandb.log(metrics, step=self.completed_steps)
+            if self.wandb_enabled:
+                wandb.log(metrics, step=self.completed_steps)
             logger.info(f"Step {self.completed_steps}, Loss: {metrics})")
 
     def _create_data_iterators(self):
@@ -419,7 +439,7 @@ class VLATrainer(TrainerUtils):
                 raise ValueError(f"Unsupported save_format `{save_format}`. Expected `pt` or `safetensors`.")
             logger.info(f"Training complete. Final model saved at {final_checkpoint}")
 
-        if self.accelerator.is_main_process:
+        if self.accelerator.is_main_process and self.wandb_enabled:
             wandb.finish()
 
         self.accelerator.wait_for_everyone()

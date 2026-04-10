@@ -21,6 +21,11 @@ if [[ "${ROBOTWIN_USE_BF16:-1}" != "0" ]]; then
     use_bf16_flag+=(--use_bf16)
 fi
 
+eval_optimized_3d_flag=()
+if [[ "${ROBOTWIN_DISABLE_3D_TEACHER_FOR_EVAL:-1}" != "0" ]]; then
+    eval_optimized_3d_flag+=(--disable_3d_teacher_for_eval)
+fi
+
 echo "[INFO] Starting RoboTwin policy server"
 echo "[INFO] checkpoint: ${your_ckpt}"
 echo "[INFO] gpu: ${gpu_id}"
@@ -29,4 +34,5 @@ echo "[INFO] port: ${port}"
 CUDA_VISIBLE_DEVICES="${gpu_id}" "${star_vla_python}" "${REPO_ROOT}/deployment/model_server/server_policy.py" \
     --ckpt_path "${your_ckpt}" \
     --port "${port}" \
+    "${eval_optimized_3d_flag[@]}" \
     "${use_bf16_flag[@]}"

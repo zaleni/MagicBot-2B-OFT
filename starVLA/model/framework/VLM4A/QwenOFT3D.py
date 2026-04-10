@@ -43,6 +43,7 @@ class QwenOFT3DDefaultConfig:
 
     future3d: dict = field(default_factory=lambda: {
         "enable": True,
+        "load_training_only_modules": True,
         "future_delta": 15,
         "num_query_tokens": 432,
         "placeholder_token": "<future3d_query>",
@@ -83,6 +84,7 @@ class QwenOFT3D(baseframework):
 
         self.future3d_cfg = self.config.framework.future3d
         self.future3d_enabled = self.future3d_cfg.get("enable", True) not in ["False", False]
+        self.load_future3d_training_modules = self.future3d_cfg.get("load_training_only_modules", True) not in ["False", False]
         self.lambda_3d = float(self.future3d_cfg.get("lambda_3d", 0.01))
 
         if self.future3d_enabled:
@@ -122,28 +124,34 @@ class QwenOFT3D(baseframework):
             init_std = float(self.future3d_cfg.get("future_query_init_std", 0.02))
 
             self.future_3d_queries = nn.Parameter(torch.randn(1, self.num_future_query_tokens, hidden_size) * init_std)
-            self.future_3d_output_queries = nn.Parameter(
-                torch.randn(1, self.da3_tokens_per_view, hidden_size) * init_std
-            )
-            self.future_3d_messenger_norms = nn.ModuleList(
-                [nn.LayerNorm(hidden_size) for _ in self.query_layer_indices]
-            )
-            self.future_3d_output_decoder = Future3DPerceiverResampler(
-                dim=hidden_size,
-                num_heads=int(num_attention_heads),
-                output_dim=self.da3_query_dim,
-            )
-            self.da3_teacher = DA3BackboneTeacher(
-                model_path_or_name=self.future3d_cfg.da3_model_path_or_name,
-                process_res=int(self.future3d_cfg.get("da3_teacher_process_res", 504)),
-                dtype=torch.bfloat16,
-                teacher_layers=self.da3_teacher_layers,
-                code_root=self.future3d_cfg.get("da3_code_root", None),
-            )
-            if self.da3_teacher.feature_dim != self.da3_query_dim:
-                raise ValueError(
-                    f"DA3 teacher dim ({self.da3_teacher.feature_dim}) does not match da3_query_dim ({self.da3_query_dim})"
+            if self.load_future3d_training_modules:
+                self.future_3d_output_queries = nn.Parameter(
+                    torch.randn(1, self.da3_tokens_per_view, hidden_size) * init_std
                 )
+                self.future_3d_messenger_norms = nn.ModuleList(
+                    [nn.LayerNorm(hidden_size) for _ in self.query_layer_indices]
+                )
+                self.future_3d_output_decoder = Future3DPerceiverResampler(
+                    dim=hidden_size,
+                    num_heads=int(num_attention_heads),
+                    output_dim=self.da3_query_dim,
+                )
+                self.da3_teacher = DA3BackboneTeacher(
+                    model_path_or_name=self.future3d_cfg.da3_model_path_or_name,
+                    process_res=int(self.future3d_cfg.get("da3_teacher_process_res", 504)),
+                    dtype=torch.bfloat16,
+                    teacher_layers=self.da3_teacher_layers,
+                    code_root=self.future3d_cfg.get("da3_code_root", None),
+                )
+                if self.da3_teacher.feature_dim != self.da3_query_dim:
+                    raise ValueError(
+                        f"DA3 teacher dim ({self.da3_teacher.feature_dim}) does not match da3_query_dim ({self.da3_query_dim})"
+                    )
+            else:
+                self.register_parameter("future_3d_output_queries", None)
+                self.future_3d_messenger_norms = nn.ModuleList()
+                self.future_3d_output_decoder = None
+                self.da3_teacher = None
         else:
             self.query_layer_indices = tuple()
             self.da3_teacher_layers = tuple()
@@ -166,7 +174,8 @@ class QwenOFT3D(baseframework):
             f"action={self.action_token!r} id={self.action_token_id} "
             f"runtime_registered={self._runtime_registered_tokens.get('action', False)} | "
             f"future3d={self.future_3d_token!r} id={self.future_3d_token_id} "
-            f"runtime_registered={self._runtime_registered_tokens.get('future3d', False)}"
+            f"runtime_registered={self._runtime_registered_tokens.get('future3d', False)} | "
+            f"load_future3d_training_modules={self.load_future3d_training_modules}"
         )
 
     def forward(self, examples: List[dict] = None, **kwargs) -> Tuple:
@@ -186,7 +195,7 @@ class QwenOFT3D(baseframework):
         output_dict = {"action_loss": action_loss}
         total_loss = action_loss
 
-        if self.future3d_enabled and self.lambda_3d > 0:
+        if self.future3d_enabled and self.lambda_3d > 0 and self.da3_teacher is not None:
             future_images, future_image_mask = self._build_future_image_batch(examples, pred_actions.device)
             loss_3d, loss_logs = self.compute_3d_query_loss(
                 hidden_states=qwenvl_outputs.hidden_states,

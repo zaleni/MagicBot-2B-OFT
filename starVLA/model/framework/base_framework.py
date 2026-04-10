@@ -6,6 +6,7 @@ Base framework abstraction providing:
 Note: No device placement or optimizer concerns handled here (delegated to trainer).
 """
 
+import copy
 import importlib
 import pkgutil
 from pathlib import Path
@@ -22,6 +23,15 @@ from starVLA.training.trainer_utils import initialize_overwatch
 logger = initialize_overwatch(__name__)
 _FRAMEWORKS_IMPORTED = False
 _FRAMEWORK_IMPORT_ERRORS = {}
+
+
+def _deep_update_config(base: dict, overrides: dict) -> dict:
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_update_config(base[key], value)
+        else:
+            base[key] = value
+    return base
 
 
 def _import_framework_module(module_path: str) -> None:
@@ -252,6 +262,14 @@ class baseframework(PreTrainedModel):
         """
         pretrained_checkpoint = Path(pretrained_checkpoint)
         model_config, norm_stats = read_mode_config(pretrained_checkpoint)  # read config and norm_stats
+        config_overrides = kwargs.pop("config_overrides", None)
+        load_state_strict = kwargs.pop("load_state_strict", True)
+        state_dict_skip_prefixes = tuple(kwargs.pop("state_dict_skip_prefixes", ()))
+        if kwargs:
+            logger.warning("Unused from_pretrained kwargs for `%s`: %s", cls.__name__, sorted(kwargs.keys()))
+
+        if config_overrides:
+            model_config = _deep_update_config(copy.deepcopy(model_config), config_overrides)
 
         config = dict_to_namespace(model_config)
         model_config = config
@@ -267,11 +285,28 @@ class baseframework(PreTrainedModel):
             model_state_dict = load_file(str(pretrained_checkpoint))
         else:
             model_state_dict = torch.load(pretrained_checkpoint, map_location="cpu")
+        if state_dict_skip_prefixes:
+            skipped_keys = [
+                key for key in model_state_dict.keys()
+                if any(key.startswith(prefix) for prefix in state_dict_skip_prefixes)
+            ]
+            if skipped_keys:
+                logger.info(
+                    "Skipping %d checkpoint keys during load for `%s` due to prefixes %s",
+                    len(skipped_keys),
+                    type(FrameworkModel).__name__,
+                    state_dict_skip_prefixes,
+                )
+                model_state_dict = {
+                    key: value
+                    for key, value in model_state_dict.items()
+                    if not any(key.startswith(prefix) for prefix in state_dict_skip_prefixes)
+                }
         # logger.info(f"Loading model weights from `{pretrained_checkpoint}`")
         model_keys = set(FrameworkModel.state_dict().keys())
         checkpoint_keys = set(model_state_dict.keys())
         try:
-            FrameworkModel.load_state_dict(model_state_dict, strict=True)
+            FrameworkModel.load_state_dict(model_state_dict, strict=load_state_strict)
         except RuntimeError as e:
             # must keep all keys matched
             common_keys = model_keys.intersection(checkpoint_keys)
@@ -283,6 +318,18 @@ class baseframework(PreTrainedModel):
                 logger.warning(f"Unexpected keys in state_dict: {unexpected_keys}")
 
             raise e
+
+        if not load_state_strict:
+            missing_keys = sorted(model_keys - checkpoint_keys)
+            unexpected_keys = sorted(checkpoint_keys - model_keys)
+            if missing_keys:
+                logger.info("Non-strict load missing keys for `%s`: %s", type(FrameworkModel).__name__, missing_keys)
+            if unexpected_keys:
+                logger.info(
+                    "Non-strict load unexpected keys for `%s`: %s",
+                    type(FrameworkModel).__name__,
+                    unexpected_keys,
+                )
 
         # **ensure model is on GPU**
         FrameworkModel = FrameworkModel

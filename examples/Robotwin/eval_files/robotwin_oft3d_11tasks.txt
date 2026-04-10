@@ -1,0 +1,11 @@
+hanging_mug
+move_stapler_pad
+place_fan
+handover_mic
+open_microwave
+place_can_basket
+place_dual_shoes
+stack_blocks_three
+move_can_pot
+blocks_ranking_rgb
+blocks_ranking_size
