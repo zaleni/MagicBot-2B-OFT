@@ -10,12 +10,12 @@ export NCCL_TIMEOUT=1000  # timeout set to 1 hour (unit: seconds)
 # === Please modify the following paths according to your environment ===
 Framework_name=QwenOFT3D
 freeze_module_list=''
-base_vlm=playground/Pretrained_models/Qwen3.5-2B
+base_vlm=/inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/model/Qwen3.5-2B
 config_yaml=./examples/Robotwin/train_files/starvla_cotrain_robotwin_abs.yaml
 run_root_dir=./results/Checkpoints
 data_root=/inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/Robotwin_all_50
 data_mix=robotwin_selected_50_future3d
-run_id=0129_${data_mix}_qwen35_2b_oft3d_all
+run_id=${data_mix}_qwen35_2b_oft3d_10task
 # === End of environment variable configuration ===
 ###########################################################################################
 
@@ -45,8 +45,8 @@ accelerate launch \
   --trainer.eval_interval 1000 \
   --run_root_dir ${run_root_dir} \
   --run_id ${run_id} \
-  --wandb_project starVLA_Robotwin \
-  --wandb_entity axi-the-cat \
+  --wandb_project MagicBot-2B-OFT3D \
+  --wandb_entity zaleni \
   # --is_debug True
 
 
