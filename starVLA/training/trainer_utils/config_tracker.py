@@ -572,7 +572,7 @@ _original_is_config = OmegaConf.is_config
 _original_merge = OmegaConf.merge
 
 
-def _patched_to_container(cfg, resolve=True, enum_to_str=False, structured_config_mode=None):
+def _patched_to_container(cfg, *args, **kwargs):
     """Patched OmegaConf.to_container that handles AccessTrackedConfig.
 
     When called on a tracked config, marks the entire subtree as accessed
@@ -583,14 +583,16 @@ def _patched_to_container(cfg, resolve=True, enum_to_str=False, structured_confi
         cfg = cfg.unwrap()
 
     try:
-        if structured_config_mode is not None:
-            return _original_to_container(
-                cfg, resolve=resolve, enum_to_str=enum_to_str, structured_config_mode=structured_config_mode
-            )
-        else:
-            return _original_to_container(cfg, resolve=resolve, enum_to_str=enum_to_str)
+        return _original_to_container(cfg, *args, **kwargs)
     except TypeError:
-        return _original_to_container(cfg, resolve=resolve)
+        fallback_kwargs = dict(kwargs)
+        for key in ("throw_on_missing", "structured_config_mode", "enum_to_str"):
+            fallback_kwargs.pop(key, None)
+            try:
+                return _original_to_container(cfg, *args, **fallback_kwargs)
+            except TypeError:
+                continue
+        return _original_to_container(cfg, *args)
 
 
 def _patched_save(config, f, resolve=False):
