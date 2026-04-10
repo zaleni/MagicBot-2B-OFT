@@ -163,6 +163,7 @@ class UnifiedTrainer(TrainerUtils):
         )
         self.model = self.freeze_backbones(self.model, freeze_modules=freeze_modules)
         self.print_trainable_parameters(self.model)
+        self.print_parameter_breakdown(self.model)
 
         # Distributed preparation: model + optimizer + dataloaders in ONE call
         # DeepSpeed requires at least one dataloader in prepare() to infer train_micro_batch_size_per_gpu

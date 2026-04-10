@@ -138,6 +138,7 @@ class VLAMTrainer(TrainerUtils):
         )
         self.model = self.freeze_backbones(self.model, freeze_modules=freeze_modules)
         self.print_trainable_parameters(self.model)
+        self.print_parameter_breakdown(self.model)
 
         self.model, self.optimizer, self.vla_train_dataloader, self.vlm_train_dataloader = (
             self.setup_distributed_training(

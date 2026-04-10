@@ -11,6 +11,7 @@ from typing import Tuple
 
 import numpy as np
 import torch
+import torch.nn as nn
 from accelerate.logging import get_logger
 
 logger = get_logger(__name__)
@@ -217,6 +218,78 @@ class TrainerUtils:
             f"# Parameters (in millions): {num_params / 10**6:.3f} Total, {num_trainable_params / 10**6:.3f} Trainable"
         )
         return num_params, num_trainable_params
+
+    @staticmethod
+    def print_parameter_breakdown(model):
+        """Print parameter breakdown for key submodules such as the VLM backbone."""
+        if dist.get_rank() != 0:
+            return
+
+        def _format_param_count(count):
+            if count >= 10**9:
+                return f"{count / 10**9:.3f}B"
+            if count >= 10**6:
+                return f"{count / 10**6:.3f}M"
+            if count >= 10**3:
+                return f"{count / 10**3:.3f}K"
+            return str(count)
+
+        def _count_params(obj):
+            if obj is None:
+                return 0, 0
+            if isinstance(obj, nn.Parameter):
+                total = obj.numel()
+                trainable = total if obj.requires_grad else 0
+                return total, trainable
+            if isinstance(obj, nn.Module):
+                total = sum(p.numel() for p in obj.parameters())
+                trainable = sum(p.numel() for p in obj.parameters() if p.requires_grad)
+                return total, trainable
+            return 0, 0
+
+        def _safe_get_attr(root, path):
+            obj = root
+            try:
+                for attr in path.split("."):
+                    obj = getattr(obj, attr)
+            except AttributeError:
+                return None
+            return obj
+
+        print("Model parameter breakdown:")
+        summary_paths = [
+            ("Backbone", "qwen_vl_interface"),
+            ("BackboneCore", "qwen_vl_interface.model"),
+            ("ActionHead", "action_model"),
+            ("Future3DQueries", "future_3d_queries"),
+            ("Future3DOutputQueries", "future_3d_output_queries"),
+            ("Future3DDecoder", "future_3d_output_decoder"),
+            ("Future3DNorms", "future_3d_messenger_norms"),
+            ("DA3Teacher", "da3_teacher"),
+        ]
+
+        printed_roots = set()
+        for label, path in summary_paths:
+            obj = _safe_get_attr(model, path)
+            total, trainable = _count_params(obj)
+            if total == 0 and trainable == 0:
+                continue
+            print(
+                f"  - {label:20s} ({path}): "
+                f"{_format_param_count(total)} Total, {_format_param_count(trainable)} Trainable"
+            )
+            printed_roots.add(path.split(".", 1)[0])
+
+        for child_name, child_module in model.named_children():
+            if child_name in printed_roots:
+                continue
+            total, trainable = _count_params(child_module)
+            if total == 0 and trainable == 0:
+                continue
+            print(
+                f"  - {child_name:20s}: "
+                f"{_format_param_count(total)} Total, {_format_param_count(trainable)} Trainable"
+            )
 
     @staticmethod
     def load_pretrained_backbones(model, checkpoint_path=None, reload_modules=None):
