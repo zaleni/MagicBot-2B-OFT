@@ -13,7 +13,8 @@ freeze_module_list=''
 base_vlm=playground/Pretrained_models/Qwen3.5-2B
 config_yaml=./examples/Robotwin/train_files/starvla_cotrain_robotwin_abs.yaml
 run_root_dir=./results/Checkpoints
-data_mix=robotwin_all_50_future3d
+data_root=/inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/Robotwin_all_50
+data_mix=robotwin_selected_50_future3d
 run_id=0129_${data_mix}_qwen35_2b_oft3d_all
 # === End of environment variable configuration ===
 ###########################################################################################
@@ -35,6 +36,7 @@ accelerate launch \
   --framework.name ${Framework_name} \
   --framework.qwenvl.base_vlm ${base_vlm} \
   --datasets.vla_data.per_device_batch_size 4 \
+  --datasets.vla_data.data_root_dir ${data_root} \
   --datasets.vla_data.data_mix ${data_mix} \
   --trainer.freeze_modules ${freeze_module_list} \
   --trainer.max_train_steps 150000 \

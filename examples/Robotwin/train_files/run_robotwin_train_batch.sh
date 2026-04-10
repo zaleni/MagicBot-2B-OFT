@@ -36,7 +36,8 @@ freeze_module_list=''
 base_vlm=playground/Pretrained_models/Qwen3.5-2B
 config_yaml=./examples/Robotwin/train_files/starvla_cotrain_robotwin_abs.yaml
 run_root_dir=./results/Checkpoints
-data_mix=robotwin_all_50_future3d
+data_root=/inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/Robotwin_all_50
+data_mix=robotwin_selected_50_future3d
 run_id=0214_${data_mix}_abs_qwen35_2b_oft3d_all
 
 export HF_ENDPOINT=https://hf-mirror.com
@@ -65,6 +66,7 @@ srun --jobid "$SLURM_JOBID" bash -c '
     --framework.name '"$Framework_name"' \
     --framework.qwenvl.base_vlm '"$base_vlm"' \
     --datasets.vla_data.per_device_batch_size 4 \
+    --datasets.vla_data.data_root_dir '"$data_root"' \
     --datasets.vla_data.action_type abs_qpos \
     --datasets.vla_data.action_mode abs \
     --datasets.vla_data.data_mix '"$data_mix"' \

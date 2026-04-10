@@ -75,8 +75,8 @@ datasets:
 
   vla_data:
     dataset_py: lerobot_datasets
-    data_root_dir: playground/Datasets/RoboTwin
-    data_mix: robotwin_all_50_future3d
+    data_root_dir: /inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/Robotwin_all_50
+    data_mix: robotwin_selected_50_future3d
     action_type: abs_qpos
     action_mode: abs
     sequential_step_sampling: False
