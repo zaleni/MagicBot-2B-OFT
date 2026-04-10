@@ -35,12 +35,14 @@ class QwenOFT3DDefaultConfig:
         "action_hidden_dim": 2560,
         "future_action_window_size": 49,
         "past_action_window_size": 0,
+        "placeholder_token": "\U0001F50D",
     })
 
     future3d: dict = field(default_factory=lambda: {
         "enable": True,
         "future_delta": 15,
         "num_query_tokens": 432,
+        "placeholder_token": "\u25C6",
         "query_layer_indices": [11, 15, 19, 23],
         "lambda_3d": 0.01,
         "da3_model_path_or_name": "/inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/model/DA3-LARGE-1-1",
@@ -71,10 +73,8 @@ class QwenOFT3D(baseframework):
         self.past_action_window_size = self.config.framework.action_model.past_action_window_size
         self.chunk_len = self.past_action_window_size + 1 + self.future_action_window_size
 
-        self.action_token = "\U0001F50D"
-        self.action_token_id = self.qwen_vl_interface.processor.tokenizer(
-            self.action_token, add_special_tokens=False
-        )["input_ids"][0]
+        self.action_token = self.config.framework.action_model.get("placeholder_token", "\U0001F50D")
+        self.action_token_id = self._resolve_single_token_id(self.action_token, "action")
         self.l1_loss = nn.L1Loss()
 
         self.future3d_cfg = self.config.framework.future3d
@@ -106,6 +106,10 @@ class QwenOFT3D(baseframework):
             self.future_tokens_per_view = self.num_future_query_tokens // self.da3_num_views
             self.da3_tokens_per_view = int(self.future3d_cfg.da3_tokens_per_view)
             self.da3_query_dim = int(self.future3d_cfg.da3_query_dim)
+            self.future_3d_token = self.future3d_cfg.get("placeholder_token", "\u25C6")
+            self.future_3d_token_id = self._resolve_single_token_id(self.future_3d_token, "future3d")
+            if self.future_3d_token_id == self.action_token_id:
+                raise ValueError("future3d placeholder token must be different from action placeholder token")
 
             hidden_size = self.qwen_vl_interface.model.config.hidden_size
             num_attention_heads = getattr(self.qwen_vl_interface.model.config, "num_attention_heads", None)
@@ -145,6 +149,8 @@ class QwenOFT3D(baseframework):
             self.future_tokens_per_view = 0
             self.da3_tokens_per_view = 0
             self.da3_query_dim = 0
+            self.future_3d_token = None
+            self.future_3d_token_id = None
             self.register_parameter("future_3d_queries", None)
             self.register_parameter("future_3d_output_queries", None)
             self.future_3d_messenger_norms = nn.ModuleList()
@@ -205,15 +211,17 @@ class QwenOFT3D(baseframework):
         qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(images=batch_images, instructions=instructions)
         input_ids = qwen_inputs["input_ids"]
 
-        reserved_count = self.chunk_len + self.num_future_query_tokens
-        reserved_positions = self._select_reserved_token_positions(input_ids, reserved_count)
         future_positions = None
-        action_positions = reserved_positions
+        action_positions = self._select_token_positions(input_ids, self.action_token_id, self.chunk_len, "action")
         hook_handle = None
 
         if self.future3d_enabled:
-            future_positions = reserved_positions[:, : self.num_future_query_tokens]
-            action_positions = reserved_positions[:, self.num_future_query_tokens :]
+            future_positions = self._select_token_positions(
+                input_ids,
+                self.future_3d_token_id,
+                self.num_future_query_tokens,
+                "future3d",
+            )
             embedding_layer = self._get_embedding_layer()
             batch_size = input_ids.shape[0]
 
@@ -242,12 +250,12 @@ class QwenOFT3D(baseframework):
     def _build_prompt_suffix(self) -> str:
         action_tokens = self.action_token * self.chunk_len
         if not self.future3d_enabled:
-            return f" Please predict the next {self.chunk_len} robot actions: <action>{action_tokens}</action>."
+            return f" Predict the next {self.chunk_len} robot actions with <action>{action_tokens}</action>."
 
-        future_tokens = self.action_token * self.num_future_query_tokens
+        future_tokens = self.future_3d_token * self.num_future_query_tokens
         return (
-            f" Please align the future 3D scene using <future3d>{future_tokens}</future3d> "
-            f"and predict the next {self.chunk_len} robot actions: <action>{action_tokens}</action>."
+            f" First encode the future 3D scene with <future3d>{future_tokens}</future3d>. "
+            f"Then predict the next {self.chunk_len} robot actions with <action>{action_tokens}</action>."
         )
 
     def _get_embedding_layer(self):
@@ -260,20 +268,35 @@ class QwenOFT3D(baseframework):
             raise RuntimeError("Failed to locate the Qwen input embedding layer for future-3D query injection.")
         return embedding_layer
 
-    def _select_reserved_token_positions(self, input_ids: torch.Tensor, reserved_count: int) -> torch.Tensor:
+    def _resolve_single_token_id(self, token: str, token_name: str) -> int:
+        token_ids = self.qwen_vl_interface.processor.tokenizer(token, add_special_tokens=False)["input_ids"]
+        if len(token_ids) != 1:
+            raise ValueError(
+                f"{token_name} placeholder token {token!r} is tokenized into {len(token_ids)} pieces: {token_ids}. "
+                "Please choose a placeholder that maps to a single tokenizer id."
+            )
+        return token_ids[0]
+
+    def _select_token_positions(
+        self,
+        input_ids: torch.Tensor,
+        token_id: int,
+        expected_count: int,
+        token_name: str,
+    ) -> torch.Tensor:
         batch_size, seq_len = input_ids.shape
-        mask = input_ids == self.action_token_id
+        mask = input_ids == token_id
         counts = mask.sum(dim=1)
-        if (counts < reserved_count).any():
-            insufficient = (counts < reserved_count).nonzero(as_tuple=False).flatten().tolist()
+        if (counts < expected_count).any():
+            insufficient = (counts < expected_count).nonzero(as_tuple=False).flatten().tolist()
             raise RuntimeError(
-                f"The following samples have insufficient reserved tokens (< {reserved_count}): "
+                f"The following samples have insufficient {token_name} tokens (< {expected_count}): "
                 f"{insufficient} | counts={counts.tolist()}"
             )
 
         positions = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).expand(batch_size, seq_len)
         masked_positions = torch.where(mask, positions, torch.full_like(positions, -1))
-        topk_positions = masked_positions.topk(k=reserved_count, dim=-1).values
+        topk_positions = masked_positions.topk(k=expected_count, dim=-1).values
         return topk_positions.sort(dim=-1).values
 
     def _gather_positions(self, hidden_states: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
