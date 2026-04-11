@@ -92,7 +92,7 @@ accelerate launch \
   --datasets.vla_data.data_root_dir "'"${data_root}"'" \
   --datasets.vla_data.data_mix "'"${data_mix}"'" \
   --trainer.freeze_modules "'"${freeze_module_list}"'" \
-  --trainer.max_train_steps 100000 \
+  --trainer.max_train_steps 90000 \
   --trainer.save_interval 10000 \
   --trainer.logging_frequency 50 \
   --trainer.eval_interval 1000 \

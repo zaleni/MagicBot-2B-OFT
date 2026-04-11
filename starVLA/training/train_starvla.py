@@ -314,7 +314,7 @@ class VLATrainer(TrainerUtils):
         self.accelerator.load_state(checkpoint_path)
         self.accelerator.print(f"Resumed from checkpoint: {checkpoint_path}")
 
-    def _save_checkpoint(self):
+    def _legacy_save_checkpoint_unused(self):
         """Save current training state."""
         if self.accelerator.is_main_process:
             save_format = getattr(self.config.trainer, "save_format", "pt")
