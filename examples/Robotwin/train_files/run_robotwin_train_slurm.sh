@@ -51,7 +51,7 @@ else
   exit 1
 fi
 
-conda activate starVLA
+conda activate magicbot
 
 export GPUS_PER_NODE=8
 export TOTAL_GPUS=$((GPUS_PER_NODE * SLURM_NNODES))
