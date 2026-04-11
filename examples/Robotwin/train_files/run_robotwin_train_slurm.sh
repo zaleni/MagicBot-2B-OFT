@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=robotwin_oft3d
-#SBATCH -p h100
-#SBATCH -N 2
+#SBATCH -p hx
+#SBATCH -N 1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
-#SBATCH --cpus-per-task=128
+#SBATCH --cpus-per-task=112
 #SBATCH --output=%x-%j.out
 #SBATCH --error=%x-%j.err
 
@@ -16,22 +16,23 @@ unset NCCL_IB_HCA
 
 export NCCL_BLOCKING_WAIT=1
 export NCCL_ASYNC_ERROR_HANDLING=1
-export NCCL_TIMEOUT=1000
+export NCCL_TIMEOUT=1200
 export WANDB_MODE=offline
 export HF_ENDPOINT=https://hf-mirror.com
+cd /HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/MagicBot-2B-OFT
+echo "Current working directory: $(pwd)"
 
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-REPO_ROOT=$(cd "${SCRIPT_DIR}/../../.." && pwd)
-cd "${REPO_ROOT}"
-
+export CUDA_HOME=/APP/u22/ai_x86/CUDA/12.4
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}
+export PATH=$CUDA_HOME/bin:$PATH
 ###########################################################################################
 # Only edit the paths / name below if needed.
 Framework_name=QwenOFT3D
-base_vlm=/inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/model/Qwen3.5-2B
-da3_model_path=/inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/model/DA3-LARGE-1-1
+base_vlm=Qwen/Qwen3.5-2B
+da3_model_path=depth-anything/DA3-LARGE-1.1
 config_yaml=./examples/Robotwin/train_files/starvla_cotrain_robotwin_abs.yaml
-run_root_dir=./results/Checkpoints
-data_root=/inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/Robotwin_all_50
+run_root_dir=/HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/MagicBot-2B-OFT/results/Checkpoints
+data_root=/HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/data/RoboTwin-Randomized
 run_id=robotwin_selected_50_future3d_qwen35_2b_oft3d_n2g16
 ###########################################################################################
 
@@ -43,10 +44,10 @@ output_dir=${run_root_dir}/${run_id}
 mkdir -p "${output_dir}"
 cp "$0" "${output_dir}/"
 
-if [ -f /root/miniconda3/etc/profile.d/conda.sh ]; then
+if [ -f /HOME/uestc_jksong/uestc_jksong_1/miniconda3/etc/profile.d/conda.sh ]; then
+  source /HOME/uestc_jksong/uestc_jksong_1/miniconda3/etc/profile.d/conda.sh
+elif [ -f /root/miniconda3/etc/profile.d/conda.sh ]; then
   source /root/miniconda3/etc/profile.d/conda.sh
-elif [ -f "${HOME}/miniconda3/etc/profile.d/conda.sh" ]; then
-  source "${HOME}/miniconda3/etc/profile.d/conda.sh"
 else
   echo "Cannot find conda.sh. Please update the conda path in this script."
   exit 1
@@ -67,7 +68,6 @@ echo "MASTER_PORT=${MASTER_PORT}"
 
 srun --ntasks="${SLURM_NNODES}" --ntasks-per-node=1 bash -c '
 set -euo pipefail
-cd "'"${REPO_ROOT}"'"
 echo "Host=$(hostname)  SLURM_PROCID=$SLURM_PROCID"
 
 accelerate launch \
