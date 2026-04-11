@@ -49,7 +49,7 @@ class QwenOFT3DDefaultConfig:
         "placeholder_token": "<future3d_query>",
         "query_layer_indices": [11, 15, 19, 23],
         "lambda_3d": 0.01,
-        "da3_model_path_or_name": "/inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/model/DA3-LARGE-1-1",
+        "da3_model_path_or_name": "./playground/Pretrained_models/DA3-LARGE-1-1",
         "da3_variant": "large",
         "da3_code_root": None,
         "da3_teacher_process_res": 504,

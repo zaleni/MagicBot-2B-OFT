@@ -34,6 +34,7 @@ echo "MASTER_ADDR=$MASTER_ADDR  MASTER_PORT=$MASTER_PORT"
 Framework_name=QwenOFT3D
 freeze_module_list=''
 base_vlm=playground/Pretrained_models/Qwen3.5-2B
+da3_model_path=${DA3_MODEL_PATH:-/inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/model/DA3-LARGE-1-1}
 config_yaml=./examples/Robotwin/train_files/starvla_cotrain_robotwin_abs.yaml
 run_root_dir=./results/Checkpoints
 data_root=/inspire/ssd/project/embodied-basic-model/zhangjianing-253108140206/DATASET/Robotwin_all_50
@@ -65,6 +66,7 @@ srun --jobid "$SLURM_JOBID" bash -c '
     --config_yaml '"$config_yaml"' \
     --framework.name '"$Framework_name"' \
     --framework.qwenvl.base_vlm '"$base_vlm"' \
+    --framework.future3d.da3_model_path_or_name '"$da3_model_path"' \
     --datasets.vla_data.per_device_batch_size 4 \
     --datasets.vla_data.data_root_dir '"$data_root"' \
     --datasets.vla_data.action_type abs_qpos \
