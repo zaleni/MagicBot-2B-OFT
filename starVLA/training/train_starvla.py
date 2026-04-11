@@ -12,6 +12,7 @@ Conventions:
 
 # Standard Library
 import argparse
+import copy
 import json
 import os
 import time
@@ -35,7 +36,7 @@ from transformers import AutoProcessor, get_scheduler
 # Local Modules
 from starVLA.dataloader import build_dataloader
 from starVLA.model.framework.base_framework import build_framework
-from starVLA.training.trainer_utils.config_tracker import AccessTrackedConfig, wrap_config
+from starVLA.training.trainer_utils.config_tracker import AccessTrackedConfig, unwrap_config, wrap_config
 from starVLA.training.trainer_utils.trainer_tools import TrainerUtils, build_param_lr_groups, normalize_dotlist_args
 
 deepspeed_plugin = DeepSpeedPlugin()
@@ -51,6 +52,15 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Initialize logger
 logger = get_logger(__name__)
+
+
+def _deep_update_dict(base: dict, overrides: dict) -> dict:
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_update_dict(base[key], value)
+        else:
+            base[key] = value
+    return base
 
 
 def load_fast_tokenizer():
@@ -177,6 +187,58 @@ class VLATrainer(TrainerUtils):
             * self.accelerator.gradient_accumulation_steps
         )
 
+    def _save_inference_only_weights_enabled(self) -> bool:
+        return bool(getattr(self.config.trainer, "save_inference_only_weights", False))
+
+    def _get_export_model(self):
+        return self.accelerator.unwrap_model(self.model)
+
+    def _get_export_state_dict(self):
+        state_dict = self.accelerator.get_state_dict(self.model)
+        if not self._save_inference_only_weights_enabled():
+            return state_dict
+
+        export_model = self._get_export_model()
+        filtered_state_dict, skipped_keys = export_model.filter_state_dict_for_inference(state_dict)
+        logger.info(
+            "Saving inference-only checkpoint for `%s`: kept %d keys, skipped %d training-only keys.",
+            type(export_model).__name__,
+            len(filtered_state_dict),
+            len(skipped_keys),
+        )
+        return filtered_state_dict
+
+    def _save_config_files(self):
+        if not self.accelerator.is_main_process or not isinstance(self.config, AccessTrackedConfig):
+            return
+
+        output_dir = Path(self.config.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        if not self._save_inference_only_weights_enabled():
+            self.config.save_accessed_config(output_dir / "config.yaml", use_original_values=False)
+            full_cfg_path = output_dir / "config.full.yaml"
+            logger.info(f"Saving full merged configuration to `{full_cfg_path}`...")
+            self.config.save_full_config(full_cfg_path)
+            return
+
+        train_accessed = self.config.export_accessed_config(use_original_values=False)
+        train_full = OmegaConf.to_container(unwrap_config(self.config), resolve=True)
+        export_model = self._get_export_model()
+        config_overrides = export_model.get_inference_only_config_overrides()
+
+        inference_accessed = _deep_update_dict(copy.deepcopy(train_accessed), copy.deepcopy(config_overrides))
+        inference_full = _deep_update_dict(copy.deepcopy(train_full), copy.deepcopy(config_overrides))
+
+        OmegaConf.save(OmegaConf.create(inference_accessed), output_dir / "config.yaml")
+        OmegaConf.save(OmegaConf.create(inference_full), output_dir / "config.full.yaml")
+        OmegaConf.save(OmegaConf.create(train_accessed), output_dir / "config.training.yaml")
+        OmegaConf.save(OmegaConf.create(train_full), output_dir / "config.full.training.yaml")
+        logger.info(
+            "Saved inference-ready config.yaml plus training config snapshots "
+            "(`config.training.yaml`, `config.full.training.yaml`)."
+        )
+
     def _init_wandb(self):
         """Initialize Weights & Biases."""
         if not self.accelerator.is_main_process:
@@ -258,7 +320,7 @@ class VLATrainer(TrainerUtils):
             save_format = getattr(self.config.trainer, "save_format", "pt")
             checkpoint_path = os.path.join(self.checkpoint_dir, f"steps_{self.completed_steps}")
 
-            state_dict = self.accelerator.get_state_dict(self.model)
+            state_dict = self._get_export_state_dict()
             if save_format == "safetensors":
                 from safetensors.torch import save_file
 
@@ -275,11 +337,9 @@ class VLATrainer(TrainerUtils):
 
             if isinstance(self.config, AccessTrackedConfig):
                 logger.info("📊 Saving accessed configuration...")
-                output_dir = Path(self.config.output_dir)
-                self.config.save_accessed_config(output_dir / "config.yaml", use_original_values=False)
-                full_cfg_path = output_dir / "config.full.yaml"
+                self._save_config_files()
+                full_cfg_path = Path(self.config.output_dir) / "config.full.yaml"
                 logger.info(f"📦 Saving full merged configuration to `{full_cfg_path}`...")
-                self.config.save_full_config(full_cfg_path, resolve=True)
                 logger.info("✅ Configuration files saved")
 
         self.accelerator.wait_for_everyone()
@@ -311,11 +371,39 @@ class VLATrainer(TrainerUtils):
 
         return batch_vla
 
+    def _save_checkpoint(self):
+        """Save current training state."""
+        if self.accelerator.is_main_process:
+            save_format = getattr(self.config.trainer, "save_format", "pt")
+            checkpoint_path = os.path.join(self.checkpoint_dir, f"steps_{self.completed_steps}")
+
+            state_dict = self._get_export_state_dict()
+            if save_format == "safetensors":
+                from safetensors.torch import save_file
+
+                save_file(state_dict, checkpoint_path + "_model.safetensors")
+            elif save_format == "pt":
+                torch.save(state_dict, checkpoint_path + "_pytorch_model.pt")
+            else:
+                raise ValueError(f"Unsupported save_format `{save_format}`. Expected `pt` or `safetensors`.")
+
+            summary_data = {"steps": self.completed_steps}
+            with open(os.path.join(self.config.output_dir, "summary.jsonl"), "a") as f:
+                f.write(json.dumps(summary_data) + "\n")
+            self.accelerator.print(f"Checkpoint saved at {checkpoint_path}")
+
+            if isinstance(self.config, AccessTrackedConfig):
+                logger.info("Saving configuration files...")
+                self._save_config_files()
+                logger.info("Configuration files saved")
+
+        self.accelerator.wait_for_everyone()
+
     def _save_config_snapshot(self):
         """Save accessed config snapshot. Called at train start and each checkpoint."""
         if self.accelerator.is_main_process and isinstance(self.config, AccessTrackedConfig):
             output_dir = Path(self.config.output_dir)
-            self.config.save_accessed_config(output_dir / "config.yaml", use_original_values=False)
+            self._save_config_files()
             logger.info(f"📊 Accessed config snapshot saved to {output_dir / 'config.yaml'}")
 
     def train(self):
@@ -428,7 +516,7 @@ class VLATrainer(TrainerUtils):
             save_format = getattr(self.config.trainer, "save_format", "pt")
             final_checkpoint = os.path.join(self.config.output_dir, "final_model")
             os.makedirs(final_checkpoint, exist_ok=True)
-            state_dict = self.accelerator.get_state_dict(self.model)
+            state_dict = self._get_export_state_dict()
             if save_format == "safetensors":
                 from safetensors.torch import save_file
 
@@ -437,6 +525,7 @@ class VLATrainer(TrainerUtils):
                 torch.save(state_dict, os.path.join(final_checkpoint, "pytorch_model.pt"))
             else:
                 raise ValueError(f"Unsupported save_format `{save_format}`. Expected `pt` or `safetensors`.")
+            self._save_config_files()
             logger.info(f"Training complete. Final model saved at {final_checkpoint}")
 
         if self.accelerator.is_main_process and self.wandb_enabled:

@@ -233,6 +233,34 @@ class baseframework(PreTrainedModel):
         out = self.qwen_vl_interface(**batch)
         return {"vlm_loss": out.loss}
 
+    def get_inference_only_state_dict_skip_prefixes(self) -> tuple[str, ...]:
+        """Return checkpoint key prefixes that are only needed for training.
+
+        Subclasses can override this to strip auxiliary heads / teachers from
+        exported inference checkpoints.
+        """
+        return tuple()
+
+    def get_inference_only_config_overrides(self) -> dict[str, Any]:
+        """Return config overrides required to load an inference-only checkpoint."""
+        return {}
+
+    def filter_state_dict_for_inference(
+        self, state_dict: Dict[str, torch.Tensor]
+    ) -> tuple[Dict[str, torch.Tensor], list[str]]:
+        """Remove training-only weights from a state_dict for inference export."""
+        skip_prefixes = tuple(self.get_inference_only_state_dict_skip_prefixes())
+        if not skip_prefixes:
+            return state_dict, []
+
+        skipped_keys = [
+            key for key in state_dict.keys() if any(key.startswith(prefix) for prefix in skip_prefixes)
+        ]
+        filtered_state_dict = {
+            key: value for key, value in state_dict.items() if not any(key.startswith(prefix) for prefix in skip_prefixes)
+        }
+        return filtered_state_dict, skipped_keys
+
     @classmethod
     def from_pretrained(
         cls,

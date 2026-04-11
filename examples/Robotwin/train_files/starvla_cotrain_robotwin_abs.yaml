@@ -93,13 +93,13 @@ datasets:
 trainer:
   epochs: 100
   max_train_steps: 1000000
-  num_warmup_steps: 5000
+  num_warmup_steps: 2000
   save_interval: 5000
   eval_interval: 100
   learning_rate:
     base: 1e-05
     qwen_vl_interface: 1.0e-05
-    action_model: 1.0e-04
+    action_model: 5.0e-05
   lr_scheduler_type: cosine_with_min_lr
   scheduler_specific_kwargs:
     min_lr: 5.0e-07
@@ -116,6 +116,7 @@ trainer:
   logging_frequency: 10
   gradient_clipping: 1.0
   gradient_accumulation_steps: 1
+  save_inference_only_weights: true
 
   optimizer:
     name: AdamW

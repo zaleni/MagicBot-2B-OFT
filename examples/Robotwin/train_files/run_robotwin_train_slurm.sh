@@ -18,7 +18,7 @@ export NCCL_BLOCKING_WAIT=1
 export NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_TIMEOUT=1200
 export WANDB_MODE=offline
-export HF_ENDPOINT=https://hf-mirror.com
+# export HF_ENDPOINT=https://hf-mirror.com
 cd /HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/MagicBot-2B-OFT
 echo "Current working directory: $(pwd)"
 
@@ -28,17 +28,19 @@ export PATH=$CUDA_HOME/bin:$PATH
 ###########################################################################################
 # Only edit the paths / name below if needed.
 Framework_name=QwenOFT3D
-base_vlm=Qwen/Qwen3.5-2B
-da3_model_path=depth-anything/DA3-LARGE-1.1
+base_vlm=/HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/Qwen3.5-2B
+da3_model_path=/HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/DA3-LARGE-1.1
 config_yaml=./examples/Robotwin/train_files/starvla_cotrain_robotwin_abs.yaml
 run_root_dir=/HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/MagicBot-2B-OFT/results/Checkpoints
 data_root=/HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/data/RoboTwin-Randomized
-run_id=robotwin_selected_50_future3d_qwen35_2b_oft3d_n2g16
+run_id=robotwin_selected_50_future3d_qwen35_2b_oft3d_32
+attn_implementation=flash_attention_2
+future3d_num_query_tokens=216
 ###########################################################################################
 
 data_mix=robotwin_selected_50_future3d
 freeze_module_list=''
-per_device_batch_size=8
+per_device_batch_size=4
 
 output_dir=${run_root_dir}/${run_id}
 mkdir -p "${output_dir}"
@@ -65,6 +67,8 @@ echo "GPUS_PER_NODE=${GPUS_PER_NODE}"
 echo "TOTAL_GPUS=${TOTAL_GPUS}"
 echo "MASTER_ADDR=${MASTER_ADDR}"
 echo "MASTER_PORT=${MASTER_PORT}"
+echo "attn_implementation=${attn_implementation}"
+echo "future3d_num_query_tokens=${future3d_num_query_tokens}"
 
 srun --ntasks="${SLURM_NNODES}" --ntasks-per-node=1 bash -c '
 set -euo pipefail
@@ -81,14 +85,16 @@ accelerate launch \
   --config_yaml "'"${config_yaml}"'" \
   --framework.name "'"${Framework_name}"'" \
   --framework.qwenvl.base_vlm "'"${base_vlm}"'" \
+  --framework.qwenvl.attn_implementation "'"${attn_implementation}"'" \
   --framework.future3d.da3_model_path_or_name "'"${da3_model_path}"'" \
+  --framework.future3d.num_query_tokens "'"${future3d_num_query_tokens}"'" \
   --datasets.vla_data.per_device_batch_size "'"${per_device_batch_size}"'" \
   --datasets.vla_data.data_root_dir "'"${data_root}"'" \
   --datasets.vla_data.data_mix "'"${data_mix}"'" \
   --trainer.freeze_modules "'"${freeze_module_list}"'" \
-  --trainer.max_train_steps 90000 \
+  --trainer.max_train_steps 100000 \
   --trainer.save_interval 10000 \
-  --trainer.logging_frequency 25 \
+  --trainer.logging_frequency 50 \
   --trainer.eval_interval 1000 \
   --run_root_dir "'"${run_root_dir}"'" \
   --run_id "'"${run_id}"'" \

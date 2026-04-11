@@ -178,6 +178,24 @@ class QwenOFT3D(baseframework):
             f"load_future3d_training_modules={self.load_future3d_training_modules}"
         )
 
+    def get_inference_only_state_dict_skip_prefixes(self) -> tuple[str, ...]:
+        return (
+            "da3_teacher.",
+            "future_3d_output_queries",
+            "future_3d_messenger_norms.",
+            "future_3d_output_decoder.",
+        )
+
+    def get_inference_only_config_overrides(self) -> dict:
+        return {
+            "framework": {
+                "future3d": {
+                    "load_training_only_modules": False,
+                    "lambda_3d": 0.0,
+                }
+            }
+        }
+
     def forward(self, examples: List[dict] = None, **kwargs) -> Tuple:
         batch_images = [example["image"] for example in examples]
         instructions = [example["lang"] for example in examples]
