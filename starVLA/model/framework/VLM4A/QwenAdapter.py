@@ -543,7 +543,7 @@ class Qwen_Adapter(baseframework):
                 phase=self.phase,
             )  # (B, chunk_len, action_dim)
 
-        normalized_actions = predicted_actions.detach().cpu().numpy()
+        normalized_actions = predicted_actions.detach().float().cpu().numpy()
         return {"normalized_actions": normalized_actions}
 
 

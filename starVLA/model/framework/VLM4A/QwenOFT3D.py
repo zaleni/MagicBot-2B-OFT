@@ -243,7 +243,7 @@ class QwenOFT3D(baseframework):
         last_hidden = qwenvl_outputs.hidden_states[-1]
         action_queries = self._prepare_action_queries(last_hidden, action_positions)
         pred_actions = self.action_model.predict_action(action_queries)
-        return {"normalized_actions": pred_actions.detach().cpu().numpy()}
+        return {"normalized_actions": pred_actions.detach().float().cpu().numpy()}
 
     def _run_qwen(self, batch_images, instructions):
         instructions = [instruction + self._build_prompt_suffix() for instruction in instructions]
