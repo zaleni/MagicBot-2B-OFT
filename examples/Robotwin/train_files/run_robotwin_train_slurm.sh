@@ -33,7 +33,7 @@ da3_model_path=/HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/DA3-LARGE-1.1
 config_yaml=./examples/Robotwin/train_files/starvla_cotrain_robotwin_abs.yaml
 run_root_dir=/HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/MagicBot-2B-OFT/results/Checkpoints
 data_root=/HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/data/RoboTwin-Randomized
-run_id=robotwin_selected_50_future3d_qwen35_2b_oft3d_32
+run_id=robotwin_selected_50_future3d_qwen35_2b_oft3d_32_q216
 attn_implementation=flash_attention_2
 future3d_num_query_tokens=216
 ###########################################################################################

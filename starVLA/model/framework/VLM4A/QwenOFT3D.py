@@ -204,7 +204,7 @@ class QwenOFT3D(baseframework):
         qwenvl_outputs, future_positions, action_positions = self._run_qwen(batch_images, instructions)
         last_hidden = qwenvl_outputs.hidden_states[-1]
 
-        action_queries = self._gather_positions(last_hidden, action_positions).float()
+        action_queries = self._prepare_action_queries(last_hidden, action_positions)
         pred_actions = self.action_model.predict_action(action_queries)
         actions = torch.as_tensor(np.array(actions), device=pred_actions.device, dtype=pred_actions.dtype)
         actions_target = actions[:, -self.chunk_len :, :]
@@ -241,7 +241,7 @@ class QwenOFT3D(baseframework):
 
         qwenvl_outputs, _, action_positions = self._run_qwen(batch_images, instructions)
         last_hidden = qwenvl_outputs.hidden_states[-1]
-        action_queries = self._gather_positions(last_hidden, action_positions).float()
+        action_queries = self._prepare_action_queries(last_hidden, action_positions)
         pred_actions = self.action_model.predict_action(action_queries)
         return {"normalized_actions": pred_actions.detach().cpu().numpy()}
 
@@ -373,6 +373,14 @@ class QwenOFT3D(baseframework):
     def _gather_positions(self, hidden_states: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
         batch_indices = torch.arange(hidden_states.shape[0], device=hidden_states.device).unsqueeze(1).expand_as(positions)
         return hidden_states[batch_indices, positions.to(hidden_states.device)]
+
+    def _prepare_action_queries(self, hidden_states: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
+        action_queries = self._gather_positions(hidden_states, positions)
+        try:
+            action_param = next(self.action_model.parameters())
+        except StopIteration:
+            return action_queries.float()
+        return action_queries.to(device=action_param.device, dtype=action_param.dtype)
 
     def _build_future_image_batch(self, examples: List[dict], device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
         future_images = []
