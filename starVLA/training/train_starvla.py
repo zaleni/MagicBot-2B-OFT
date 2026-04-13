@@ -190,23 +190,63 @@ class VLATrainer(TrainerUtils):
     def _save_inference_only_weights_enabled(self) -> bool:
         return bool(getattr(self.config.trainer, "save_inference_only_weights", False))
 
+    def _save_full_training_weights_enabled(self) -> bool:
+        return bool(getattr(self.config.trainer, "save_full_training_weights", False))
+
     def _get_export_model(self):
         return self.accelerator.unwrap_model(self.model)
 
-    def _get_export_state_dict(self):
-        state_dict = self.accelerator.get_state_dict(self.model)
+    def _get_state_dicts_for_save(self):
+        full_state_dict = self.accelerator.get_state_dict(self.model)
         if not self._save_inference_only_weights_enabled():
-            return state_dict
+            return full_state_dict, None
 
         export_model = self._get_export_model()
-        filtered_state_dict, skipped_keys = export_model.filter_state_dict_for_inference(state_dict)
+        filtered_state_dict, skipped_keys = export_model.filter_state_dict_for_inference(full_state_dict)
         logger.info(
             "Saving inference-only checkpoint for `%s`: kept %d keys, skipped %d training-only keys.",
             type(export_model).__name__,
             len(filtered_state_dict),
             len(skipped_keys),
         )
-        return filtered_state_dict
+
+        full_training_state_dict = full_state_dict if self._save_full_training_weights_enabled() else None
+        return filtered_state_dict, full_training_state_dict
+
+    def _get_export_state_dict(self):
+        export_state_dict, _ = self._get_state_dicts_for_save()
+        return export_state_dict
+
+    def _save_state_dict_file(self, state_dict, save_path: str) -> None:
+        save_format = getattr(self.config.trainer, "save_format", "pt")
+        if save_format == "safetensors":
+            from safetensors.torch import save_file
+
+            save_file(state_dict, save_path)
+        elif save_format == "pt":
+            torch.save(state_dict, save_path)
+        else:
+            raise ValueError(f"Unsupported save_format `{save_format}`. Expected `pt` or `safetensors`.")
+
+    def _checkpoint_file_path(self, checkpoint_prefix: str, training_full: bool = False) -> str:
+        save_format = getattr(self.config.trainer, "save_format", "pt")
+        if save_format == "safetensors":
+            suffix = "_training_model.safetensors" if training_full else "_model.safetensors"
+        elif save_format == "pt":
+            suffix = "_training_pytorch_model.pt" if training_full else "_pytorch_model.pt"
+        else:
+            raise ValueError(f"Unsupported save_format `{save_format}`. Expected `pt` or `safetensors`.")
+        return checkpoint_prefix + suffix
+
+    def _final_model_file_path(self, final_checkpoint_dir: str, training_full: bool = False) -> str:
+        save_format = getattr(self.config.trainer, "save_format", "pt")
+        if save_format == "safetensors":
+            filename = "training_model.safetensors" if training_full else "model.safetensors"
+        elif save_format == "pt":
+            filename = "training_pytorch_model.pt" if training_full else "pytorch_model.pt"
+        else:
+            raise ValueError(f"Unsupported save_format `{save_format}`. Expected `pt` or `safetensors`.")
+        return os.path.join(final_checkpoint_dir, filename)
 
     def _save_config_files(self):
         if not self.accelerator.is_main_process or not isinstance(self.config, AccessTrackedConfig):
@@ -374,23 +414,22 @@ class VLATrainer(TrainerUtils):
     def _save_checkpoint(self):
         """Save current training state."""
         if self.accelerator.is_main_process:
-            save_format = getattr(self.config.trainer, "save_format", "pt")
             checkpoint_path = os.path.join(self.checkpoint_dir, f"steps_{self.completed_steps}")
+            export_state_dict, full_training_state_dict = self._get_state_dicts_for_save()
+            export_checkpoint_file = self._checkpoint_file_path(checkpoint_path)
+            self._save_state_dict_file(export_state_dict, export_checkpoint_file)
 
-            state_dict = self._get_export_state_dict()
-            if save_format == "safetensors":
-                from safetensors.torch import save_file
-
-                save_file(state_dict, checkpoint_path + "_model.safetensors")
-            elif save_format == "pt":
-                torch.save(state_dict, checkpoint_path + "_pytorch_model.pt")
-            else:
-                raise ValueError(f"Unsupported save_format `{save_format}`. Expected `pt` or `safetensors`.")
+            full_training_checkpoint_file = None
+            if full_training_state_dict is not None:
+                full_training_checkpoint_file = self._checkpoint_file_path(checkpoint_path, training_full=True)
+                self._save_state_dict_file(full_training_state_dict, full_training_checkpoint_file)
 
             summary_data = {"steps": self.completed_steps}
             with open(os.path.join(self.config.output_dir, "summary.jsonl"), "a") as f:
                 f.write(json.dumps(summary_data) + "\n")
             self.accelerator.print(f"Checkpoint saved at {checkpoint_path}")
+            if full_training_checkpoint_file is not None:
+                self.accelerator.print(f"Full training checkpoint saved at {full_training_checkpoint_file}")
 
             if isinstance(self.config, AccessTrackedConfig):
                 logger.info("Saving configuration files...")
@@ -513,18 +552,15 @@ class VLATrainer(TrainerUtils):
     def _finalize_training(self):
         """Training end processing."""
         if self.accelerator.is_main_process:
-            save_format = getattr(self.config.trainer, "save_format", "pt")
             final_checkpoint = os.path.join(self.config.output_dir, "final_model")
             os.makedirs(final_checkpoint, exist_ok=True)
-            state_dict = self._get_export_state_dict()
-            if save_format == "safetensors":
-                from safetensors.torch import save_file
-
-                save_file(state_dict, os.path.join(final_checkpoint, "model.safetensors"))
-            elif save_format == "pt":
-                torch.save(state_dict, os.path.join(final_checkpoint, "pytorch_model.pt"))
-            else:
-                raise ValueError(f"Unsupported save_format `{save_format}`. Expected `pt` or `safetensors`.")
+            export_state_dict, full_training_state_dict = self._get_state_dicts_for_save()
+            self._save_state_dict_file(export_state_dict, self._final_model_file_path(final_checkpoint))
+            if full_training_state_dict is not None:
+                self._save_state_dict_file(
+                    full_training_state_dict,
+                    self._final_model_file_path(final_checkpoint, training_full=True),
+                )
             self._save_config_files()
             logger.info(f"Training complete. Final model saved at {final_checkpoint}")
 

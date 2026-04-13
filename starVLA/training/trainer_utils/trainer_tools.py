@@ -551,13 +551,25 @@ class TrainerUtils:
             self.accelerator.print(f"No checkpoint directory found at {checkpoint_dir}")
             return None, 0
 
-        # Get all checkpoints matching naming convention, supports .pt and .safetensors
-        checkpoints = [
-            f
-            for f in os.listdir(checkpoint_dir)
-            if re.match(r"steps_(\d+)_(?:pytorch_model\.pt|model\.safetensors)$", f)
-            and os.path.isfile(os.path.join(checkpoint_dir, f))  # Ensure it's a file
+        checkpoint_patterns = [
+            ("training", r"steps_(\d+)_training_(?:pytorch_model\.pt|model\.safetensors)$"),
+            ("default", r"steps_(\d+)_(?:pytorch_model\.pt|model\.safetensors)$"),
         ]
+
+        checkpoints = []
+        selected_pattern = None
+        selected_label = None
+        for label, pattern in checkpoint_patterns:
+            matches = [
+                f
+                for f in os.listdir(checkpoint_dir)
+                if re.match(pattern, f) and os.path.isfile(os.path.join(checkpoint_dir, f))
+            ]
+            if matches:
+                checkpoints = matches
+                selected_pattern = pattern
+                selected_label = label
+                break
 
         if not checkpoints:
             self.accelerator.print(f"No checkpoints found in {checkpoint_dir}")
@@ -566,7 +578,7 @@ class TrainerUtils:
         # Extract step numbers and sort
         try:
             checkpoints_with_steps = [
-                (ckpt, int(re.search(r"steps_(\d+)_(?:pytorch_model\.pt|model\.safetensors)$", ckpt).group(1)))
+                (ckpt, int(re.search(selected_pattern, ckpt).group(1)))
                 for ckpt in checkpoints
             ]
         except AttributeError as e:
@@ -578,7 +590,10 @@ class TrainerUtils:
         latest_checkpoint, completed_steps = checkpoints_with_steps[-1]
 
         latest_checkpoint_path = os.path.join(checkpoint_dir, latest_checkpoint)
-        self.accelerator.print(f"Latest checkpoint found: {latest_checkpoint_path}")
+        if selected_label == "training":
+            self.accelerator.print(f"Latest full training checkpoint found: {latest_checkpoint_path}")
+        else:
+            self.accelerator.print(f"Latest checkpoint found: {latest_checkpoint_path}")
         return latest_checkpoint_path, completed_steps
 
 

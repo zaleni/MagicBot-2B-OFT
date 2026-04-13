@@ -1,10 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=robotwin_oft3d
-#SBATCH -p h100x
+#SBATCH -p hx
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=112
+#SBATCH --mem-per-cpu=12G
 #SBATCH --output=%x-%j.out
 #SBATCH --error=%x-%j.err
 
@@ -39,7 +40,8 @@ da3_model_path=/HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/DA3-LARGE-1.1
 config_yaml=./examples/Robotwin/train_files/starvla_cotrain_robotwin_abs.yaml
 run_root_dir=/HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/MagicBot-2B-OFT/results/Checkpoints
 data_root=/HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/data/RoboTwin-Randomized
-run_id=robotwin_selected_50_future3d_qwen35_2b_oft3d_32_q216_80k_2
+pretrained_checkpoint=/HOME/uestc_jksong/uestc_jksong_1/SSD_POOL/jjhao/MagicBot-2B-OFT/results/Checkpoints/robotwin_selected_50_future3d_qwen35_2b_oft3d_16_q216_50k/checkpoints/steps_10000_pytorch_model.pt
+run_id=robotwin_selected_50_future3d_qwen35_2b_oft3d_32_q216_30k_from10k_warmstart
 attn_implementation=flash_attention_2
 future3d_num_query_tokens=216
 accelerate_config=${ACCELERATE_CONFIG:-starVLA/config/deepseeds/deepspeed_zero2_stable.yaml}
@@ -79,6 +81,7 @@ echo "future3d_num_query_tokens=${future3d_num_query_tokens}"
 echo "accelerate_config=${accelerate_config}"
 echo "per_device_batch_size=${per_device_batch_size}"
 echo "freeze_module_list=${freeze_module_list}"
+echo "pretrained_checkpoint=${pretrained_checkpoint}"
 
 srun --ntasks="${SLURM_NNODES}" --ntasks-per-node=1 bash -c '
 set -euo pipefail
@@ -101,9 +104,11 @@ accelerate launch \
   --datasets.vla_data.per_device_batch_size "'"${per_device_batch_size}"'" \
   --datasets.vla_data.data_root_dir "'"${data_root}"'" \
   --datasets.vla_data.data_mix "'"${data_mix}"'" \
+  --trainer.pretrained_checkpoint "'"${pretrained_checkpoint}"'" \
+  --trainer.is_resume false \
   --trainer.freeze_modules "'"${freeze_module_list}"'" \
-  --trainer.max_train_steps 60000 \
-  --trainer.save_interval 10000 \
+  --trainer.max_train_steps 30000 \
+  --trainer.save_interval 5000 \
   --trainer.logging_frequency 100 \
   --trainer.eval_interval 1000000 \
   --run_root_dir "'"${run_root_dir}"'" \

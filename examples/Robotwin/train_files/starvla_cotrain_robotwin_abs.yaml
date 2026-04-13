@@ -117,6 +117,7 @@ trainer:
   gradient_clipping: 1.0
   gradient_accumulation_steps: 1
   save_inference_only_weights: true
+  save_full_training_weights: true
 
   optimizer:
     name: AdamW
