@@ -22,22 +22,27 @@ if [[ ! -f "${robotwin_eval_script}" ]]; then
 fi
 
 patch_check_tool=""
+supports_cli_policy_ckpt=0
 if command -v rg >/dev/null 2>&1; then
     patch_check_tool="rg"
-    patch_check_cmd=(rg -q "policy_ckpt_path" "${robotwin_eval_script}")
+    if rg -q "policy_ckpt_path" "${robotwin_eval_script}"; then
+        supports_cli_policy_ckpt=1
+    fi
 elif command -v grep >/dev/null 2>&1; then
     patch_check_tool="grep"
-    patch_check_cmd=(grep -q "policy_ckpt_path" "${robotwin_eval_script}")
+    if grep -q "policy_ckpt_path" "${robotwin_eval_script}"; then
+        supports_cli_policy_ckpt=1
+    fi
 else
     echo "Neither rg nor grep is available, so the RoboTwin patch check cannot run." >&2
     exit 1
 fi
 
-if ! "${patch_check_cmd[@]}"; then
-    echo "Your third-party RoboTwin checkout is missing the required policy_ckpt_path patch: ${robotwin_eval_script}" >&2
-    echo "Patch check used: ${patch_check_tool}" >&2
-    echo "Apply the documented patch in your own RoboTwin repo; see examples/Robotwin/README.md." >&2
-    exit 1
+if [[ "${supports_cli_policy_ckpt}" == "1" ]]; then
+    echo "[INFO] RoboTwin eval_policy.py supports --policy_ckpt_path (${patch_check_tool} check passed)"
+else
+    echo "[WARN] RoboTwin eval_policy.py does not expose --policy_ckpt_path: ${robotwin_eval_script}" >&2
+    echo "[WARN] Falling back to injecting policy_ckpt_path into the runtime policy YAML." >&2
 fi
 
 policy_name="${ROBOTWIN_POLICY_NAME:-model2robotwin_interface}"
@@ -67,6 +72,7 @@ sed \
     -e "s/^host:.*/host: \"${policy_host}\"/" \
     -e "s/^port:.*/port: ${policy_port}/" \
     "${deploy_policy_template}" > "${runtime_deploy_policy}"
+printf 'policy_ckpt_path: "%s"\n' "${policy_ckpt_path}" >> "${runtime_deploy_policy}"
 
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
 echo -e "\033[33mgpu id (to use): ${gpu_id}\033[0m"
@@ -88,10 +94,10 @@ echo "policy_port: ${policy_port}"
 
 PYTHONWARNINGS=ignore::UserWarning \
 "${robotwin_python}" script/eval_policy.py --config "${runtime_deploy_policy}" \
-    --policy_ckpt_path "${policy_ckpt_path}" \
     --overrides \
     --task_name "${task_name}" \
     --task_config "${task_config}" \
     --ckpt_setting "${ckpt_setting}" \
     --seed "${seed}" \
-    --policy_name "${policy_name}"
+    --policy_name "${policy_name}" \
+    $([[ "${supports_cli_policy_ckpt}" == "1" ]] && printf '%s %q' "--policy_ckpt_path" "${policy_ckpt_path}")
