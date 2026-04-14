@@ -1,31 +1,36 @@
 # MagicBot-2B-OFT-Robotwin
 
-Evaluation guide for the released RoboTwin checkpoint:
+This README focuses on the stable workflow for RoboTwin:
 
-- Hugging Face repo: `zaleni/MagicBot-2B-OFT-Robotwin`
-- Codebase: this repository
-- Benchmark: RoboTwin 2.0
-- Recommended eval entry: `examples/Robotwin/eval_files/eval_robotwin_oft3d_11tasks.sh`
+1. prepare the environment
+2. train your own MagicBot RoboTwin model
+3. run RoboTwin inference / evaluation on the produced checkpoint
 
-This checkpoint is evaluated through MagicBot's policy server plus a third-party RoboTwin simulator checkout.
+The public checkpoint may require local path fixes before it can be used directly, so the instructions below are written around locally produced checkpoints.
 
 ## What You Need
 
-Prepare these pieces before running evaluation:
+Prepare these items first:
 
-- A Linux machine with NVIDIA GPU(s)
+- a Linux machine with NVIDIA GPU(s)
 - Python 3.10
-- This MagicBot repository
-- A working RoboTwin checkout
-- The released checkpoint snapshot from `zaleni/MagicBot-2B-OFT-Robotwin`
-- The base VLM and DA3 weights referenced by the checkpoint config
+- this MagicBot repository
+- a working RoboTwin checkout
+- RoboTwin training data
+- the base VLM weights used by the training script
+- the DA3 weights used by OFT3D
 
-One Python environment is enough. If you prefer, you can also use two environments:
+Recommended base assets:
 
-- `STARVLA_PYTHON`: Python used for MagicBot / policy server
-- `ROBOTWIN_PYTHON`: Python used for RoboTwin evaluation
+- `Qwen3.5-2B`
+- `DA3-LARGE-1.1`
 
-For a simple setup, point both variables to the same Python interpreter.
+One Python environment is enough. If you want, you can also use two:
+
+- `STARVLA_PYTHON` for the MagicBot policy server
+- `ROBOTWIN_PYTHON` for RoboTwin evaluation
+
+For the simplest setup, point both variables to the same Python interpreter.
 
 ## 1. Install MagicBot
 
@@ -36,23 +41,22 @@ cd MagicBot-2B-OFT
 conda create -n magicbot python=3.10 -y
 conda activate magicbot
 
-# Install a CUDA-matching PyTorch first if your machine doesn't have one yet.
-# Then install MagicBot dependencies.
+# Install a CUDA-matching PyTorch first if needed.
 pip install -r requirements.txt
 pip install -e .
 
 # RoboTwin eval helper dependencies used by the wrapper scripts.
 pip install -r examples/Robotwin/eval_files/requirements.txt
 
-# Optional but recommended. If unavailable, the model loader will fall back to sdpa.
+# Optional but recommended. If flash-attn is unavailable, the loader will fall back to sdpa.
 pip install flash-attn --no-build-isolation
 ```
 
 ## 2. Install RoboTwin
 
-Clone and install RoboTwin by following the RoboTwin upstream instructions for simulator dependencies.
+Clone RoboTwin and finish its simulator installation by following the RoboTwin upstream instructions.
 
-After installation, you should have a local checkout like:
+Example:
 
 ```bash
 /path/to/RoboTwin
@@ -64,57 +68,9 @@ During evaluation, export:
 export ROBOTWIN_PATH=/path/to/RoboTwin
 ```
 
-## 3. Download the Released Checkpoint
+## 3. Optional RoboTwin Compatibility Patch
 
-Download the full snapshot from Hugging Face. Do not copy out only `pytorch_model.pt`.
-
-```bash
-pip install -U "huggingface_hub[cli]"
-
-huggingface-cli download \
-  zaleni/MagicBot-2B-OFT-Robotwin \
-  --local-dir ./checkpoints/MagicBot-2B-OFT-Robotwin
-```
-
-Expected layout:
-
-```text
-checkpoints/MagicBot-2B-OFT-Robotwin/
-  config.yaml
-  dataset_statistics.json
-  final_model/
-    pytorch_model.pt
-```
-
-Important:
-
-- MagicBot loads `config.yaml` and `dataset_statistics.json` relative to the checkpoint file.
-- Keep the directory structure intact.
-- Pass the checkpoint file path itself, for example `.../final_model/pytorch_model.pt`.
-
-## 4. Fix Local Paths in `config.yaml`
-
-The released `config.yaml` may still contain absolute paths from the training machine. Before evaluation, open the downloaded `config.yaml` and update these fields to your local paths:
-
-```yaml
-framework:
-  qwenvl:
-    base_vlm: /path/to/your/Qwen3.5-2B
-  future3d:
-    da3_model_path_or_name: /path/to/your/DA3-LARGE-1.1
-```
-
-If these paths are not updated, you may see errors such as:
-
-- `HFValidationError`
-- local file not found for `base_vlm`
-- local file not found for `da3_model_path_or_name`
-
-## 5. Optional RoboTwin Compatibility Patch
-
-The current MagicBot eval wrapper already tries to pass `policy_ckpt_path` safely. Most users can skip this step.
-
-If your RoboTwin checkout still errors on `policy_ckpt_path`, patch `RoboTwin/script/eval_policy.py` so that it accepts an optional `--policy_ckpt_path` argument and forwards it into the loaded config:
+If your RoboTwin checkout is older, evaluation may fail with a `policy_ckpt_path` error. In that case, patch `RoboTwin/script/eval_policy.py` so it accepts an optional `--policy_ckpt_path` argument and forwards it into the loaded config:
 
 ```diff
 @@
@@ -133,7 +89,92 @@ If your RoboTwin checkout still errors on `policy_ckpt_path`, patch `RoboTwin/sc
 +        config["policy_ckpt_path"] = args.policy_ckpt_path
 ```
 
-## 6. Set Python Paths
+## 4. Prepare Training Paths
+
+For training, edit one of these scripts:
+
+- `examples/Robotwin/train_files/run_robotwin_train.sh`
+- `examples/Robotwin/train_files/run_robotwin_train_slurm.sh`
+
+At minimum, update these fields to your local paths:
+
+- `base_vlm`
+- `da3_model_path`
+- `data_root`
+- `run_root_dir`
+- `run_id`
+
+If you use the SLURM warm-start example, also check:
+
+- `pretrained_checkpoint`
+
+The default Robotwin config used by these scripts is:
+
+- `examples/Robotwin/train_files/starvla_cotrain_robotwin_abs.yaml`
+
+The key dataset settings in that config are:
+
+- `data_mix: robotwin_selected_50_future3d`
+- `action_mode: abs`
+- `save_inference_only_weights: true`
+
+## 5. Start Training
+
+### Single-node 8-GPU training
+
+After editing `run_robotwin_train.sh`, run:
+
+```bash
+conda activate magicbot
+cd MagicBot-2B-OFT
+
+bash examples/Robotwin/train_files/run_robotwin_train.sh
+```
+
+### SLURM 8-GPU training
+
+After editing `run_robotwin_train_slurm.sh`, run:
+
+```bash
+conda activate magicbot
+cd MagicBot-2B-OFT
+
+sbatch examples/Robotwin/train_files/run_robotwin_train_slurm.sh
+```
+
+## 6. Training Outputs
+
+Training outputs are written under:
+
+```text
+<run_root_dir>/<run_id>/
+```
+
+Expected layout:
+
+```text
+<run_root_dir>/<run_id>/
+  config.yaml
+  dataset_statistics.json
+  checkpoints/
+    steps_5000_pytorch_model.pt
+    steps_10000_pytorch_model.pt
+    ...
+  final_model/
+    pytorch_model.pt
+```
+
+Recommended evaluation targets:
+
+- `.../checkpoints/steps_<N>_pytorch_model.pt`
+- `.../final_model/pytorch_model.pt`
+
+Important:
+
+- Do not move only `pytorch_model.pt` somewhere else by itself.
+- MagicBot also reads `config.yaml` and `dataset_statistics.json` relative to the checkpoint file.
+
+## 7. Set Python Paths for Inference / Evaluation
 
 Single-environment setup:
 
@@ -151,7 +192,25 @@ export STARVLA_PYTHON=/path/to/starvla-env/bin/python
 export ROBOTWIN_PYTHON=/path/to/robotwin-env/bin/python
 ```
 
-## 7. Run Evaluation
+## 8. If You Move the Checkpoint to Another Machine
+
+Before evaluation, open the checkpoint's `config.yaml` and update these fields to local paths:
+
+```yaml
+framework:
+  qwenvl:
+    base_vlm: /path/to/your/Qwen3.5-2B
+  future3d:
+    da3_model_path_or_name: /path/to/your/DA3-LARGE-1.1
+```
+
+If these are not updated, you may see path-related errors such as:
+
+- `HFValidationError`
+- local file not found for `base_vlm`
+- local file not found for `da3_model_path_or_name`
+
+## 9. Run RoboTwin Inference / Evaluation
 
 ### 1-GPU smoke test
 
@@ -164,8 +223,8 @@ export STARVLA_PYTHON=$CONDA_PREFIX/bin/python
 export ROBOTWIN_PYTHON=$CONDA_PREFIX/bin/python
 
 bash examples/Robotwin/eval_files/eval_robotwin_oft3d_11tasks.sh \
-  -c ./checkpoints/MagicBot-2B-OFT-Robotwin/final_model/pytorch_model.pt \
-  -n MagicBot-2B-OFT-Robotwin \
+  -c /path/to/<run_root_dir>/<run_id>/final_model/pytorch_model.pt \
+  -n <run_id> \
   -m randomized \
   -j 1 \
   -p 5694
@@ -182,8 +241,8 @@ export STARVLA_PYTHON=$CONDA_PREFIX/bin/python
 export ROBOTWIN_PYTHON=$CONDA_PREFIX/bin/python
 
 bash examples/Robotwin/eval_files/eval_robotwin_oft3d_11tasks.sh \
-  -c ./checkpoints/MagicBot-2B-OFT-Robotwin/final_model/pytorch_model.pt \
-  -n MagicBot-2B-OFT-Robotwin \
+  -c /path/to/<run_root_dir>/<run_id>/final_model/pytorch_model.pt \
+  -n <run_id> \
   -m randomized \
   -j 1 \
   -p 5694
@@ -191,38 +250,52 @@ bash examples/Robotwin/eval_files/eval_robotwin_oft3d_11tasks.sh \
 
 Notes:
 
-- `-m randomized` runs the randomized RoboTwin setting.
-- `-j 1` means one concurrent eval job per visible GPU.
-- The 11-task list is defined in `examples/Robotwin/eval_files/robotwin_oft3d_11tasks.txt`.
+- `-m randomized` runs the randomized RoboTwin setting
+- `-j 1` means one concurrent eval job per visible GPU
+- the 11-task list is defined in `examples/Robotwin/eval_files/robotwin_oft3d_11tasks.txt`
 
-## 8. Where Results Are Saved
+## 10. Where Evaluation Results Are Saved
 
-Results are written next to the checkpoint directory:
+Evaluation summaries are written next to the checkpoint directory:
 
 ```text
 <checkpoint_parent>/robotwin_eval_runs/<run_name>_<timestamp>/
 ```
 
-For the command above, look for:
+Look for:
 
-- `.../robotwin_eval_runs/<name>_<timestamp>/summary.txt`
-- `.../robotwin_eval_runs/<name>_<timestamp>/summary.json`
-- `.../robotwin_eval_runs/<name>_<timestamp>/demo_randomized/`
+- `.../summary.txt`
+- `.../summary.json`
+- `.../demo_randomized/`
 
-The `demo_randomized` folder contains per-task `*_server.log` and `*_eval.log`.
+The `demo_randomized` folder contains per-task:
 
-## 9. Common Issues
+- `*_server.log`
+- `*_eval.log`
 
-### `HFValidationError` or bad local model path
+## 11. Where Videos Are Saved
 
-Cause:
+RoboTwin videos are not written into the MagicBot log directory.
 
-- `config.yaml` still points to training-machine absolute paths
+They are written under the RoboTwin checkout because the evaluation script changes into `ROBOTWIN_PATH` before launching RoboTwin.
 
-Fix:
+The save pattern is:
 
-- update `framework.qwenvl.base_vlm`
-- update `framework.future3d.da3_model_path_or_name`
+```text
+${ROBOTWIN_PATH}/eval_result/<task_name>/<policy_name>/<task_config>/<ckpt_setting>/<timestamp>/
+```
+
+Video filenames look like:
+
+```text
+episode0.mp4
+episode1.mp4
+...
+```
+
+If you cannot find videos, check whether `eval_video_log` is enabled in the RoboTwin task config. If it is off, evaluation will still run, but no mp4 files will be generated.
+
+## 12. Common Issues
 
 ### `missing the required policy_ckpt_path patch`
 
@@ -233,7 +306,18 @@ Cause:
 Fix:
 
 - use the current MagicBot eval scripts from this repo
-- or apply the optional compatibility patch above
+- or apply the compatibility patch above
+
+### `HFValidationError` or wrong local model path
+
+Cause:
+
+- the checkpoint `config.yaml` still points to paths from a different machine
+
+Fix:
+
+- update `framework.qwenvl.base_vlm`
+- update `framework.future3d.da3_model_path_or_name`
 
 ### `opening handshake failed` in `server.log`
 
@@ -243,8 +327,22 @@ Cause:
 
 If evaluation is progressing and `Success rate:` lines continue to appear in `*_eval.log`, this message can usually be ignored.
 
-## 10. Reference Files
+### No video files were generated
 
+Cause:
+
+- `eval_video_log` is disabled in RoboTwin
+
+Fix:
+
+- enable video logging in the RoboTwin task config
+- then rerun evaluation
+
+## 13. Reference Files
+
+- `examples/Robotwin/train_files/run_robotwin_train.sh`
+- `examples/Robotwin/train_files/run_robotwin_train_slurm.sh`
+- `examples/Robotwin/train_files/starvla_cotrain_robotwin_abs.yaml`
 - `examples/Robotwin/eval_files/eval_robotwin_oft3d_11tasks.sh`
 - `examples/Robotwin/eval_files/start_eval.sh`
 - `examples/Robotwin/eval_files/eval.sh`
