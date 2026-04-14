@@ -92,12 +92,22 @@ echo "task_config: ${task_config}"
 echo "ckpt_setting: ${ckpt_setting}"
 echo "policy_port: ${policy_port}"
 
-PYTHONWARNINGS=ignore::UserWarning \
-"${robotwin_python}" script/eval_policy.py --config "${runtime_deploy_policy}" \
-    --overrides \
-    --task_name "${task_name}" \
-    --task_config "${task_config}" \
-    --ckpt_setting "${ckpt_setting}" \
-    --seed "${seed}" \
-    --policy_name "${policy_name}" \
-    $([[ "${supports_cli_policy_ckpt}" == "1" ]] && printf '%s %q' "--policy_ckpt_path" "${policy_ckpt_path}")
+eval_cmd=(
+    "${robotwin_python}" script/eval_policy.py
+    --config "${runtime_deploy_policy}"
+)
+
+if [[ "${supports_cli_policy_ckpt}" == "1" ]]; then
+    eval_cmd+=(--policy_ckpt_path "${policy_ckpt_path}")
+fi
+
+eval_cmd+=(
+    --overrides
+    --task_name "${task_name}"
+    --task_config "${task_config}"
+    --ckpt_setting "${ckpt_setting}"
+    --seed "${seed}"
+    --policy_name "${policy_name}"
+)
+
+PYTHONWARNINGS=ignore::UserWarning "${eval_cmd[@]}"
